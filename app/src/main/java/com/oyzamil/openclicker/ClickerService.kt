@@ -31,9 +31,12 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
 import java.util.Random
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -89,15 +92,17 @@ class ClickerService : AccessibilityService() {
     // panel
     private var panel: LinearLayout? = null
     private var panelLp: WindowManager.LayoutParams? = null
-    private var startBtn: TextView? = null
+    private var startBtn: FrameLayout? = null
+    private var startIcon: ImageView? = null
+    private var startNum: TextView? = null
     private var statsView: TextView? = null
-    private var addBtn: TextView? = null
-    private var recBtn: TextView? = null
-    private var centerBtn: TextView? = null
-    private var eyeBtn: TextView? = null
-    private var lockBtn: TextView? = null
-    private var closeBtn: TextView? = null
-    private var settingsBtn: TextView? = null
+    private var addBtn: View? = null
+    private var recBtn: ImageView? = null
+    private var centerBtn: View? = null
+    private var eyeBtn: ImageView? = null
+    private var lockBtn: ImageView? = null
+    private var closeBtn: View? = null
+    private var settingsBtn: View? = null
     private var collapsed = false
     private var savedX = 0
     private var builtScale = 100
@@ -123,6 +128,7 @@ class ClickerService : AccessibilityService() {
     private var runCount = 0
     private var runStartAt = 0L
     private var failStreak = 0
+    private var nextAt = 0L
 
     // misc
     private var screenReceiver: BroadcastReceiver? = null
@@ -134,15 +140,24 @@ class ClickerService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        runCatching { Prefs.init(this) }
-        runCatching { Session.init(this) }
-        runCatching { CrashGuard.installLogger(this) }
-        runCatching { if (Prefs.crashGuard) CrashGuard.installLoopGuard() }
-        wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        instance = this
-        registerScreenReceiver()
-        updateKeyFilter()
-        refreshTile()
+        // Nothing in here may throw: a crash while connecting leaves the service "malfunctioning".
+        try {
+            runCatching { Prefs.init(this) }
+            runCatching { Session.init(this) }
+            runCatching { CrashGuard.installLogger(this) }
+            runCatching { CrashGuard.logExitReasons(this) }
+            runCatching { if (Prefs.crashGuard) CrashGuard.installLoopGuard() }
+            wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            instance = this
+            CrashGuard.note("service connected")
+            CrashGuard.batteryNote(this)
+            registerScreenReceiver()
+            updateKeyFilter()
+            refreshTile()
+        } catch (e: Throwable) {
+            instance = this
+            CrashGuard.log("onServiceConnected", e)
+        }
     }
 
     /** Never let an exception escape a callback: a dead process = "Not working" accessibility service. */
@@ -183,6 +198,7 @@ class ClickerService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
+        CrashGuard.note("service interrupted")
         stopRun()
     }
 
@@ -202,6 +218,7 @@ class ClickerService : AccessibilityService() {
     }
 
     private fun shutdown() {
+        CrashGuard.note("service stopped (unbind/destroy)")
         runCatching { hidePanel() }
         unregisterScreenReceiver()
         ui.removeCallbacksAndMessages(null)
@@ -317,19 +334,18 @@ class ClickerService : AccessibilityService() {
 
     private fun toast(t: String) = runCatching { Toast.makeText(this, t, Toast.LENGTH_SHORT).show() }
 
-    private fun btn(t: String, onClick: () -> Unit): TextView {
-        val v = TextView(this)
-        v.text = t
-        v.setTextColor(Color.WHITE)
-        v.textSize = 17f * ps()
-        v.gravity = Gravity.CENTER
-        v.minWidth = pdp(36)
-        v.minHeight = pdp(40)
-        v.setOnClickListener {
-            safe("panel button") { onClick() }
-        }
+    private fun iconBtn(res: Int, onClick: () -> Unit): ImageView {
+        val v = ImageView(this)
+        v.setImageResource(res)
+        v.setColorFilter(Color.WHITE)
+        v.scaleType = ImageView.ScaleType.FIT_CENTER
+        val pad = pdp(8)
+        v.setPadding(pad, pad, pad, pad)
+        v.setOnClickListener { safe("panel button") { onClick() } }
         return v
     }
+
+    private fun iconLp() = LinearLayout.LayoutParams(pdp(38), pdp(40))
 
     // ---------- panel ----------
 
@@ -354,7 +370,7 @@ class ClickerService : AccessibilityService() {
         params.y = y
 
         // drag handle: drag = move, tap = minimize / maximize
-        val handle = btn("⠿") {}
+        val handle = iconBtn(R.drawable.ic_drag) {}
         var sx = 0f
         var sy = 0f
         var px = 0
@@ -385,36 +401,53 @@ class ClickerService : AccessibilityService() {
             true
         }
 
-        val sb = btn("▶") { toggleRun() }
+        val sb = FrameLayout(this)
+        val si = ImageView(this)
+        si.setImageResource(R.drawable.ic_play)
+        si.setColorFilter(Color.WHITE)
+        si.setPadding(pdp(9), pdp(9), pdp(9), pdp(9))
+        val sn = TextView(this)
+        sn.setTextColor(Color.WHITE)
+        sn.textSize = 17f * ps()
+        sn.typeface = Typeface.DEFAULT_BOLD
+        sn.gravity = Gravity.CENTER
+        sn.visibility = View.GONE
+        sb.addView(si, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        sb.addView(sn, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        sb.setOnClickListener { safe("start button") { toggleRun() } }
         startBtn = sb
+        startIcon = si
+        startNum = sn
         styleStartBtn()
 
         val st = TextView(this)
         st.setTextColor(Color.WHITE)
         st.textSize = 12f * ps()
         st.typeface = Typeface.DEFAULT_BOLD
-        st.setPadding(pdp(6), 0, pdp(6), 0)
+        st.gravity = Gravity.CENTER
+        st.minWidth = pdp(74)
+        st.setPadding(pdp(4), 0, pdp(4), 0)
         st.visibility = View.GONE
         statsView = st
 
-        addBtn = btn("+") { toggleMenu() }
-        recBtn = btn("●") { if (recordView != null) stopRecord() else startRecord() }
-        centerBtn = btn("⌖") { recenter() }
-        eyeBtn = btn("👁") { toggleMarkersHidden() }
-        lockBtn = btn(if (Prefs.markersLocked) "🔒" else "🔓") { toggleLock() }
-        settingsBtn = btn("⚙") { openApp() }
-        closeBtn = btn("✕") { hidePanel() }
+        addBtn = iconBtn(R.drawable.ic_add) { toggleMenu() }
+        recBtn = iconBtn(R.drawable.ic_record) { if (recordView != null) stopRecord() else startRecord() }
+        centerBtn = iconBtn(R.drawable.ic_center) { recenter() }
+        eyeBtn = iconBtn(if (markersHidden) R.drawable.ic_eye_off else R.drawable.ic_eye) { toggleMarkersHidden() }
+        lockBtn = iconBtn(if (Prefs.markersLocked) R.drawable.ic_lock else R.drawable.ic_lock_open) { toggleLock() }
+        settingsBtn = iconBtn(R.drawable.ic_settings) { openApp() }
+        closeBtn = iconBtn(R.drawable.ic_close) { hidePanel() }
 
-        p.addView(handle)
+        p.addView(handle, iconLp())
         p.addView(sb, LinearLayout.LayoutParams(pdp(40), pdp(40)).apply { setMargins(pdp(4), 0, pdp(4), 0) })
         p.addView(st)
-        p.addView(addBtn)
-        p.addView(recBtn)
-        p.addView(centerBtn)
-        p.addView(eyeBtn)
-        p.addView(lockBtn)
-        p.addView(settingsBtn)
-        p.addView(closeBtn)
+        p.addView(addBtn, iconLp())
+        p.addView(recBtn, iconLp())
+        p.addView(centerBtn, iconLp())
+        p.addView(eyeBtn, iconLp())
+        p.addView(lockBtn, iconLp())
+        p.addView(settingsBtn, iconLp())
+        p.addView(closeBtn, iconLp())
 
         panel = p
         panelLp = params
@@ -429,6 +462,7 @@ class ClickerService : AccessibilityService() {
         lastW = w
         lastH = h
         updatePanelButtons()
+        restoreStartState()
         refreshMarkers()
         ui.removeCallbacks(tick)
         ui.postDelayed(tick, 1000)
@@ -492,7 +526,7 @@ class ClickerService : AccessibilityService() {
         centerBtn?.visibility = vis(full && !multi && !busy)
         eyeBtn?.visibility = vis(full)
         lockBtn?.visibility = vis(full)
-        lockBtn?.text = if (Prefs.markersLocked) "🔒" else "🔓"
+        lockBtn?.setImageResource(if (Prefs.markersLocked) R.drawable.ic_lock else R.drawable.ic_lock_open)
         settingsBtn?.visibility = vis(full && !busy)
         closeBtn?.visibility = vis(full && !busy)
     }
@@ -507,6 +541,32 @@ class ClickerService : AccessibilityService() {
         }
         b.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, colors)
             .apply { shape = GradientDrawable.OVAL }
+    }
+
+    private fun showStartIcon(res: Int) {
+        startIcon?.setImageResource(res)
+        startIcon?.visibility = View.VISIBLE
+        startNum?.visibility = View.GONE
+    }
+
+    private fun showStartNumber(n: Int) {
+        startNum?.text = n.toString()
+        startNum?.visibility = View.VISIBLE
+        startIcon?.visibility = View.GONE
+    }
+
+    private fun restoreStartState() {
+        when {
+            counting -> showStartNumber(max(1, countRemaining))
+            running -> showStartIcon(R.drawable.ic_stop)
+            else -> showStartIcon(R.drawable.ic_play)
+        }
+        styleStartBtn()
+    }
+
+    private fun setRecording(on: Boolean) {
+        recBtn?.setImageResource(if (on) R.drawable.ic_stop else R.drawable.ic_record)
+        recBtn?.setColorFilter(if (on) 0xFFFF5252.toInt() else Color.WHITE)
     }
 
     /** Opens the app so the user can change settings; the floating panel stays on screen. */
@@ -852,14 +912,14 @@ class ClickerService : AccessibilityService() {
 
     private fun toggleLock() {
         Prefs.markersLocked = !Prefs.markersLocked
-        lockBtn?.text = if (Prefs.markersLocked) "🔒" else "🔓"
+        lockBtn?.setImageResource(if (Prefs.markersLocked) R.drawable.ic_lock else R.drawable.ic_lock_open)
         applyMarkerState()
     }
 
     /** Markers are non-touchable while running, hidden or locked; invisible while hidden. */
     private fun applyMarkerState() {
         val touchable = !isBusy() && !markersHidden && !Prefs.markersLocked
-        eyeBtn?.alpha = if (markersHidden) 0.4f else 1f
+        eyeBtn?.setImageResource(if (markersHidden) R.drawable.ic_eye_off else R.drawable.ic_eye)
         for (m in markers) {
             m.view.alpha = if (markersHidden) 0f else 1f
             m.params.flags = if (touchable) {
@@ -971,7 +1031,7 @@ class ClickerService : AccessibilityService() {
             return
         }
         recordView = v
-        recBtn?.text = "■"
+        setRecording(true)
         toast(tr("Recording: tap/swipe on screen. Press ■ to finish."))
         ui.post {
             val p = panel
@@ -987,7 +1047,7 @@ class ClickerService : AccessibilityService() {
         val v = recordView ?: return
         runCatching { wm.removeView(v) }
         recordView = null
-        recBtn?.text = "●"
+        setRecording(false)
         if (refresh) {
             toast("${tr("Recorded")} ${Session.script.actions.size}")
             refreshMarkers()
@@ -1061,7 +1121,7 @@ class ClickerService : AccessibilityService() {
             beginRun()
             return
         }
-        startBtn?.text = countRemaining.toString()
+        showStartNumber(countRemaining)
         countRemaining--
         runHandler.postDelayed({ tickCountdown() }, 1000)
     }
@@ -1075,7 +1135,8 @@ class ClickerService : AccessibilityService() {
         runCount = 0
         failStreak = 0
         runStartAt = SystemClock.elapsedRealtime()
-        startBtn?.text = "■"
+        showStartIcon(R.drawable.ic_stop)
+        nextAt = SystemClock.elapsedRealtime() + 150L
         onBusyChanged()
         val stop = Prefs.stopAfterMs
         if (stop > 0) {
@@ -1096,7 +1157,8 @@ class ClickerService : AccessibilityService() {
         counting = false
         runHandler.removeCallbacksAndMessages(null)
         stepSeq++
-        startBtn?.text = "▶"
+        showStartIcon(R.drawable.ic_play)
+        nextAt = 0L
         onBusyChanged()
     }
 
@@ -1115,7 +1177,7 @@ class ClickerService : AccessibilityService() {
         override fun run() {
             if (!running) return
             safe("stats") { updateStats() }
-            ui.postDelayed(this, 500)
+            ui.postDelayed(this, 200)
         }
     }
 
@@ -1124,18 +1186,23 @@ class ClickerService : AccessibilityService() {
         ui.post(statsTick)
     }
 
-    private fun fmtTime(ms: Long): String {
-        val s = ms / 1000
+    /** Time left until the next action: 1:59 ... 0:01, then 9.8s ... 0.0s. */
+    private fun fmtRemain(ms: Long): String {
+        if (ms <= 0L) return "0.0s"
+        if (ms < 10_000L) return String.format(Locale.US, "%.1fs", ms / 1000.0)
+        val s = (ms + 999L) / 1000L
         val h = s / 3600
         val m = (s % 3600) / 60
         val sec = s % 60
-        return if (h > 0) String.format("%d:%02d:%02d", h, m, sec) else String.format("%d:%02d", m, sec)
+        return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, sec)
+        else String.format(Locale.US, "%d:%02d", m, sec)
     }
 
     private fun updateStats() {
         val v = statsView ?: return
         if (running) {
-            v.text = "$runCount · ${fmtTime(SystemClock.elapsedRealtime() - runStartAt)}"
+            val rem = if (nextAt > 0L) (nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L) else 0L
+            v.text = "$runCount · ${fmtRemain(rem)}"
         }
         v.visibility = if (running && !collapsed) View.VISIBLE else View.GONE
     }
@@ -1296,6 +1363,7 @@ class ClickerService : AccessibilityService() {
             return
         }
         val a = steps[idx]
+        nextAt = 0L
         val token = ++stepSeq
         when (a.type) {
             ActionType.WAIT -> {
@@ -1361,6 +1429,7 @@ class ClickerService : AccessibilityService() {
         val extra = if (ri > 0) rnd.nextInt(2 * ri + 1) - ri else 0
         val minDelay = if (success) 1L else 100L
         val d = (a.delayMs + extra).coerceAtLeast(minDelay)
+        nextAt = SystemClock.elapsedRealtime() + d
         runHandler.postDelayed({ runStep() }, d)
     }
 }

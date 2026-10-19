@@ -18,6 +18,14 @@ object AccessibilityEnabler {
     fun canWrite(c: Context): Boolean =
         c.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
 
+    /** Opens this service's own page in Accessibility settings (falls back to the general screen). */
+    fun detailsIntent(c: Context): android.content.Intent =
+        android.content.Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+            .putExtra(
+                android.content.Intent.EXTRA_COMPONENT_NAME,
+                ComponentName(c, ClickerService::class.java).flattenToString()
+            )
+
     fun adbCommand(c: Context) =
         "adb shell pm grant ${c.packageName} android.permission.WRITE_SECURE_SETTINGS"
 
@@ -66,6 +74,7 @@ object AccessibilityEnabler {
     private fun write(c: Context, full: String) {
         val cr = c.contentResolver
         val list = current(c)
+        CrashGuard.note("auto re-enable: writing accessibility setting")
         if (list.none { it == full }) {
             list.add(full)
             Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, list.joinToString(":"))

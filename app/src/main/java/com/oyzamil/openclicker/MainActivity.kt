@@ -2,8 +2,11 @@ package com.oyzamil.openclicker
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.AlertDialog
+import android.app.ApplicationExitInfo
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -19,6 +22,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.os.SystemClock
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -70,6 +74,7 @@ class MainActivity : Activity() {
     private lateinit var focusHolder: LinearLayout
     private lateinit var dot: View
     private lateinit var statusText: TextView
+    private lateinit var statusHint: TextView
     private lateinit var panelBtn: TextView
     private lateinit var setupCard: LinearLayout
     private lateinit var singleCard: LinearLayout
@@ -87,7 +92,12 @@ class MainActivity : Activity() {
     private lateinit var batteryBtn: TextView
     private lateinit var stayStatus: TextView
     private lateinit var stayCmd: TextView
-    private lateinit var stayCopyBtn: TextView
+    private lateinit var stayCmdRow: LinearLayout
+    private lateinit var batteryRow: View
+    private lateinit var autostartRow: View
+    private var accessRows: List<View> = emptyList()
+    private val stepRows = mutableListOf<Pair<View, TextView>>()
+    private var resumedAt = 0L
     private lateinit var stayNowBtn: TextView
     private val reqExport = 1
     private val reqImport = 2
@@ -101,6 +111,7 @@ class MainActivity : Activity() {
         Prefs.init(this)
         Session.init(this)
         CrashGuard.installLogger(this)
+        CrashGuard.logExitReasons(this)
         val dark = when (Prefs.theme) {
             0 -> true
             1 -> false
@@ -115,7 +126,6 @@ class MainActivity : Activity() {
         setContentView(build())
         applyChrome()
         focusHolder.post { focusHolder.requestFocus() }
-        askNotificationOnce()
     }
 
     @Suppress("DEPRECATION")
@@ -130,7 +140,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumedAt = SystemClock.elapsedRealtime()
         updateStatus()
+        scheduleStatusRefresh()
+        askFirstRun()
         updateBattery()
         updateStay()
         refreshList()
@@ -181,10 +194,58 @@ class MainActivity : Activity() {
         Build.VERSION.SDK_INT < 33 ||
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun askNotificationOnce() {
+    /** First launch: ask for notifications, then for "no battery restrictions" (one dialog at a time, once). */
+    private fun askFirstRun() {
         if (Build.VERSION.SDK_INT >= 33 && Prefs.notifStop && !Prefs.notifAsked && !notifGranted()) {
             Prefs.notifAsked = true
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), reqNotif)
+            return
+        }
+        if (!Prefs.batteryAsked && !batteryExempt()) {
+            Prefs.batteryAsked = true
+            window.decorView.postDelayed({ if (!isFinishing) requestBatteryExemption() }, 400)
+        }
+    }
+
+    /** "No restrictions": whitelisted from battery optimization AND not put in "Restricted" background mode. */
+    private fun batteryExempt(): Boolean = runCatching {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        pm.isIgnoringBatteryOptimizations(packageName) &&
+            (Build.VERSION.SDK_INT < 28 || !am.isBackgroundRestricted)
+    }.getOrDefault(false)
+
+    /** Phones with their own Autostart screen (Xiaomi, Oppo/Realme, Vivo, Infinix/Tecno, Huawei ...). */
+    private fun oemHasAutostart(): Boolean {
+        val m = Build.MANUFACTURER.lowercase(Locale.US)
+        return listOf(
+            "xiaomi", "redmi", "poco", "oppo", "realme", "oneplus", "vivo", "iqoo",
+            "infinix", "tecno", "itel", "transsion", "huawei", "honor", "asus", "letv"
+        ).any { m.contains(it) }
+    }
+
+    /** The app's own battery page (Allow background usage / Unrestricted). */
+    private fun openBatteryDetails() {
+        val ok = runCatching {
+            startActivity(
+                Intent("android.settings.VIEW_ADVANCED_POWER_USAGE_DETAIL", Uri.parse("package:$packageName"))
+            )
+        }.isSuccess
+        if (!ok) {
+            safeStart(
+                Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        }
+    }
+
+    /** The service needs a few seconds to (re)connect; do not show alarms while it is starting. */
+    private fun scheduleStatusRefresh() {
+        val d = window.decorView
+        for (t in longArrayOf(1000L, 3000L, 6000L, 9000L)) {
+            d.postDelayed({ if (!isFinishing) updateStatus() }, t)
         }
     }
 
@@ -249,6 +310,32 @@ class MainActivity : Activity() {
         b.setOnClickListener { onClick() }
         return b
     }
+
+    /** Icon-only button; long-press shows its name. */
+    private fun iconButton(res: Int, label: String, filled: Boolean = false, onClick: () -> Unit): ImageView {
+        val v = ImageView(this)
+        v.setImageResource(res)
+        v.scaleType = ImageView.ScaleType.FIT_CENTER
+        v.setColorFilter(if (filled) Color.WHITE else P.accent)
+        v.setPadding(dp(11), dp(11), dp(11), dp(11))
+        val bg: GradientDrawable = if (filled) {
+            GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(P.accent, P.accent2))
+                .apply { cornerRadius = dp(12).toFloat() }
+        } else {
+            rr(Color.TRANSPARENT, 12, P.accent, 1)
+        }
+        v.background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), bg, null)
+        v.contentDescription = tr(label)
+        v.tooltipText = tr(label)
+        v.setOnClickListener { onClick() }
+        return v
+    }
+
+    private fun iconW(left: Int = 0, right: Int = 0) =
+        LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            leftMargin = dp(left)
+            rightMargin = dp(right)
+        }
 
     private fun EditText.onChange(cb: (String) -> Unit) {
         addTextChangedListener(object : TextWatcher {
@@ -463,7 +550,7 @@ class MainActivity : Activity() {
 
         root.addView(header(), lpm(16))
         root.addView(statusCard(), lpm())
-        setupCard = setupCard()
+        setupCard = buildSetupCard()
         root.addView(setupCard, lpm())
         root.addView(stayCard(), lpm())
         root.addView(modeCard(), lpm())
@@ -519,12 +606,21 @@ class MainActivity : Activity() {
         statusText = text("", 15f, P.text, true)
         statusText.setPadding(dp(10), 0, dp(10), 0)
         row.addView(statusText)
-        c.addView(row, lpm(12))
+        c.addView(row, lpm(8))
+        statusHint = text("", 12f, P.sub)
+        statusHint.visibility = View.GONE
+        c.addView(statusHint, lpm(10))
 
         panelBtn = button("Show floating panel", true) {
             val s = ClickerService.instance
             if (s == null) {
-                toast("Enable the accessibility service first")
+                if (AccessibilityEnabler.ensureEnabled(this, repair = true, force = true)) {
+                    toast("Enabling…")
+                    window.decorView.postDelayed({ if (!isFinishing) updateStatus() }, 1500)
+                } else {
+                    toast("Enable the accessibility service first")
+                    openAccessibility()
+                }
             } else {
                 if (s.isPanelVisible()) {
                     s.hidePanel()
@@ -540,55 +636,125 @@ class MainActivity : Activity() {
         return c
     }
 
+    private fun serviceStarting(): Boolean =
+        ClickerService.instance == null && enabledInSettings() &&
+            SystemClock.elapsedRealtime() - resumedAt < 8000L
+
     private fun updateStatus() {
+        if (!::statusText.isInitialized) return
         val on = ClickerService.instance != null
-        dot.background = oval(if (on) P.ok else P.bad)
+        val starting = serviceStarting()
+        dot.background = oval(
+            when {
+                on -> P.ok
+                starting -> P.amber
+                else -> P.bad
+            }
+        )
         statusText.text = tr(
             when {
                 on -> "Service active"
+                starting -> "Service starting…"
                 enabledInSettings() -> "Enabled but not running. Toggle it OFF and ON in Accessibility."
                 else -> "Service not enabled"
             }
         )
         val visible = ClickerService.instance?.isPanelVisible() == true
         panelBtn.text = tr(if (visible) "Hide floating panel" else "Show floating panel")
-        setupCard.visibility = if (on) View.GONE else View.VISIBLE
+        updateWhyStopped(on || starting)
+        updateSetup()
+    }
+
+    /** When the service is not running, tell the user WHY the app process died last time. */
+    private fun updateWhyStopped(runningOrStarting: Boolean) {
+        val e = if (runningOrStarting) null else CrashGuard.recentExits(this, 1).firstOrNull()
+        if (e == null) {
+            statusHint.visibility = View.GONE
+            return
+        }
+        val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(e.whenMs))
+        statusHint.text = "${tr("Last stop")} ($time): ${tr(exitMessage(e.reason))}"
+        statusHint.visibility = View.VISIBLE
+    }
+
+    private fun exitMessage(reason: Int): String = when (reason) {
+        ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE ->
+            "The app crashed. Please use Share error log."
+        ApplicationExitInfo.REASON_LOW_MEMORY -> "Android closed the app because memory was low."
+        ApplicationExitInfo.REASON_USER_REQUESTED, ApplicationExitInfo.REASON_USER_STOPPED ->
+            "The app was closed from Recents / Force stop. Android then switches the service off."
+        ApplicationExitInfo.REASON_ANR -> "The app was not responding."
+        ApplicationExitInfo.REASON_SIGNALED, ApplicationExitInfo.REASON_OTHER ->
+            "A phone cleaner / battery manager closed the app. Turn on Autostart and set Battery to No restrictions."
+        ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "Closed because a permission changed."
+        else -> "The app was closed by Android."
+    }
+
+    /** Opens our service's own page in Accessibility settings (one tap to switch it ON). */
+    private fun openAccessibility() {
+        val ok = runCatching { startActivity(AccessibilityEnabler.detailsIntent(this)) }.isSuccess
+        if (!ok) safeStart(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
     private fun enabledInSettings(): Boolean = AccessibilityEnabler.isEnabledInSettings(this)
 
-    private fun setupCard(): LinearLayout {
+    private fun buildSetupCard(): LinearLayout {
         val c = card()
         c.addView(text("Setup", 16f, P.text, true), lpm(8))
-        var n = 1
+        stepRows.clear()
+        val access = mutableListOf<View>()
         if (Build.VERSION.SDK_INT >= 33) {
-            step(
-                c, n++, "Allow restricted settings",
-                "App info → ⋮ (top right) → Allow restricted settings. Needed once if the app was installed from an APK file.",
-                "Open App info"
-            ) {
-                safeStart(
-                    Intent(
-                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.parse("package:$packageName")
+            access.add(
+                step(
+                    c, "Allow restricted settings",
+                    "App info → ⋮ (top right) → Allow restricted settings. Needed once if the app was installed from an APK file.",
+                    "Open App info"
+                ) {
+                    safeStart(
+                        Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:$packageName")
+                        )
                     )
-                )
+                }
+            )
+        }
+        access.add(
+            step(
+                c, "Enable accessibility service",
+                "Installed apps → Open Clicker → turn ON. If Settings says 'malfunctioning', switch it OFF and then ON again.",
+                "Open Accessibility"
+            ) {
+                openAccessibility()
             }
-        }
-        step(
-            c, n, "Enable accessibility service",
-            "Installed apps → Open Clicker → turn ON. Used only to perform taps, slides and scrolls.",
-            "Open Accessibility"
-        ) {
-            safeStart(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        }
+        )
+        accessRows = access
+        batteryRow = step(
+            c, "Battery: no restrictions",
+            "Set Open Clicker to 'No restrictions' (Unrestricted). Tap Allow and confirm. On some phones also set it under App info → Battery. Without this the battery manager closes the app and the accessibility service stops.",
+            "Allow", "Battery settings", { openBatteryDetails() }
+        ) { requestBatteryExemption() }
+        autostartRow = step(
+            c, "Autostart / background start",
+            "Your phone has its own switch that stops apps from restarting after the system closes them. Turn it ON for Open Clicker.",
+            "Open autostart settings", "Done",
+            {
+                Prefs.autostartDone = true
+                updateSetup()
+            }
+        ) { openAutostart() }
         return c
     }
 
-    private fun step(parent: LinearLayout, n: Int, title: String, desc: String, label: String, action: () -> Unit) {
+    /** A setup row with one button (trailing lambda) and an optional second button. */
+    private fun step(
+        parent: LinearLayout, title: String, desc: String, label: String,
+        label2: String? = null, action2: (() -> Unit)? = null,
+        action: () -> Unit
+    ): View {
         val row = hbox()
         row.gravity = Gravity.TOP
-        val badge = text("$n", 13f, Color.WHITE, true)
+        val badge = text("•", 13f, Color.WHITE, true)
         badge.gravity = Gravity.CENTER
         badge.background = oval(P.accent)
         row.addView(badge, LinearLayout.LayoutParams(dp(26), dp(26)))
@@ -598,9 +764,35 @@ class MainActivity : Activity() {
         val d = text(desc, 12f, P.sub)
         d.setPadding(0, dp(2), 0, dp(8))
         col.addView(d)
-        col.addView(button(label, false, action))
+        if (label2 != null && action2 != null) {
+            val buttons = hbox()
+            buttons.addView(button(label, false, action), weight(0, 4))
+            buttons.addView(button(label2, false, action2), weight(4, 0))
+            col.addView(buttons)
+        } else {
+            col.addView(button(label, false, action))
+        }
         row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         parent.addView(row, lpm(12))
+        stepRows.add(row to badge)
+        return row
+    }
+
+    /** Only show the steps that are still missing; hide the whole card when everything is fine. */
+    private fun updateSetup() {
+        if (!::setupCard.isInitialized || !::batteryRow.isInitialized || !::autostartRow.isInitialized) return
+        val on = ClickerService.instance != null
+        val needAccess = !on && !serviceStarting()
+        val needBattery = !batteryExempt()
+        val needAutostart = oemHasAutostart() && !Prefs.autostartDone
+        accessRows.forEach { it.visibility = if (needAccess) View.VISIBLE else View.GONE }
+        batteryRow.visibility = if (needBattery) View.VISIBLE else View.GONE
+        autostartRow.visibility = if (needAutostart) View.VISIBLE else View.GONE
+        var n = 1
+        for ((row, badge) in stepRows) {
+            if (row.visibility == View.VISIBLE) badge.text = (n++).toString()
+        }
+        setupCard.visibility = if (needAccess || needBattery || needAutostart) View.VISIBLE else View.GONE
     }
 
     // ---------- stay enabled (self re-enable via WRITE_SECURE_SETTINGS) ----------
@@ -623,14 +815,17 @@ class MainActivity : Activity() {
         stayCmd.setTextIsSelectable(true)
         stayCmd.background = rr(P.field, 10)
         stayCmd.setPadding(dp(10), dp(10), dp(10), dp(10))
-        c.addView(stayCmd, lpm(8))
-
-        stayCopyBtn = button("Copy ADB command", false) {
-            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("adb", AccessibilityEnabler.adbCommand(this)))
-            toast("Copied")
-        }
-        c.addView(stayCopyBtn, lpm(8))
+        stayCmdRow = hbox()
+        stayCmdRow.addView(stayCmd, weight(0, 8))
+        stayCmdRow.addView(
+            iconButton(R.drawable.ic_copy, "Copy ADB command") {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("adb", AccessibilityEnabler.adbCommand(this)))
+                toast("Copied")
+            },
+            LinearLayout.LayoutParams(dp(46), dp(46))
+        )
+        c.addView(stayCmdRow, lpm(8))
 
         stayNowBtn = button("Enable service now", true) {
             val ok = AccessibilityEnabler.ensureEnabled(this, repair = true, force = true)
@@ -653,8 +848,7 @@ class MainActivity : Activity() {
         val granted = AccessibilityEnabler.canWrite(this)
         stayStatus.text = tr(if (granted) "Auto-enable is active ✓" else "Auto-enable is not set up")
         stayStatus.setTextColor(if (granted) P.ok else P.sub)
-        stayCmd.visibility = if (granted) View.GONE else View.VISIBLE
-        stayCopyBtn.visibility = if (granted) View.GONE else View.VISIBLE
+        stayCmdRow.visibility = if (granted) View.GONE else View.VISIBLE
         stayNowBtn.visibility = if (granted) View.VISIBLE else View.GONE
     }
 
@@ -938,8 +1132,8 @@ class MainActivity : Activity() {
             { Prefs.stopOnScreenOff }, { Prefs.stopOnScreenOff = it }
         )
         checkRow(
-            c, "Crash guard",
-            "Keeps the service alive after an unexpected error, so Android does not mark it 'Not working'. Takes effect after the service restarts.",
+            c, "Crash guard (experimental)",
+            "Keeps the main thread alive after unexpected errors. Leave OFF unless the service keeps crashing. Takes effect after the service restarts.",
             { Prefs.crashGuard }, { Prefs.crashGuard = it }
         )
         c.addView(text("Keep service alive", 14f, P.text, true))
@@ -951,6 +1145,7 @@ class MainActivity : Activity() {
         c.addView(hint2)
         batteryBtn = button("", false) { requestBatteryExemption() }
         c.addView(batteryBtn, lpm(8))
+        c.addView(button("Open autostart settings", false) { openAutostart() }, lpm(8))
         c.addView(button("Share error log", false) { shareErrorLog() })
         updateBattery()
         return c
@@ -970,11 +1165,10 @@ class MainActivity : Activity() {
     }
 
     private fun updateBattery() {
-        if (!::batteryBtn.isInitialized) return
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        batteryBtn.text = tr(
-            if (pm.isIgnoringBatteryOptimizations(packageName)) "Battery: unrestricted ✓" else "Disable battery optimization"
-        )
+        if (::batteryBtn.isInitialized) {
+            batteryBtn.text = tr(if (batteryExempt()) "Battery: unrestricted ✓" else "Disable battery optimization")
+        }
+        updateSetup()
     }
 
     private fun requestBatteryExemption() {
@@ -993,11 +1187,43 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Many phones (Xiaomi, Oppo/Realme, Vivo, Infinix/Tecno, Huawei...) have their own autostart screen. */
+    private fun openAutostart() {
+        val candidates = listOf(
+            "com.miui.securitycenter" to "com.miui.permcenter.autostart.AutoStartManagementActivity",
+            "com.coloros.safecenter" to "com.coloros.safecenter.permission.startup.StartupAppListActivity",
+            "com.coloros.safecenter" to "com.coloros.safecenter.startupapp.StartupAppListActivity",
+            "com.oppo.safe" to "com.oppo.safe.permission.startup.StartupAppListActivity",
+            "com.vivo.permissionmanager" to "com.vivo.permissionmanager.activity.BgStartUpManagerActivity",
+            "com.iqoo.secure" to "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity",
+            "com.transsion.phonemaster" to "com.cyin.himgr.autostart.AutoStartActivity",
+            "com.huawei.systemmanager" to "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
+            "com.oneplus.security" to "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity",
+            "com.asus.mobilemanager" to "com.asus.mobilemanager.autostart.AutoStartActivity"
+        )
+        for ((pkg, cls) in candidates) {
+            val ok = runCatching {
+                startActivity(Intent().setComponent(ComponentName(pkg, cls)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+            if (ok) return
+        }
+        toast("Allow Autostart and Background activity for Open Clicker.")
+        safeStart(
+            Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:$packageName")
+            )
+        )
+    }
+
     // ---------- auto-show apps ----------
 
     private fun autoAppsCard(): View {
         val c = card()
-        c.addView(text("Auto-show in apps", 16f, P.text, true))
+        val head = hbox()
+        head.addView(text("Auto-show in apps", 16f, P.text, true), weight())
+        head.addView(iconButton(R.drawable.ic_add, "Add app") { pickApp() }, LinearLayout.LayoutParams(dp(42), dp(42)))
+        c.addView(head)
         val hint = text(
             "The floating panel appears by itself when one of these apps opens. Optionally load a saved script for it.",
             12f, P.sub
@@ -1005,8 +1231,7 @@ class MainActivity : Activity() {
         hint.setPadding(0, dp(2), 0, dp(10))
         c.addView(hint)
         autoBox = vbox()
-        c.addView(autoBox, lpm(8))
-        c.addView(button("Add app", false) { pickApp() })
+        c.addView(autoBox, lpm(0))
         return c
     }
 
@@ -1145,9 +1370,9 @@ class MainActivity : Activity() {
         listBox = vbox()
         c.addView(listBox, lpm(8))
 
-        val r0 = hbox()
-        r0.addView(button("Undo", false) { undo() }, weight(0, 4))
-        r0.addView(button("Clear all", false) {
+        val ra = hbox()
+        ra.addView(iconButton(R.drawable.ic_undo, "Undo") { undo() }, iconW(0, 4))
+        ra.addView(iconButton(R.drawable.ic_delete, "Clear all") {
             AlertDialog.Builder(this)
                 .setTitle(tr("Clear all actions?"))
                 .setPositiveButton(tr("Clear")) { _, _ ->
@@ -1157,39 +1382,33 @@ class MainActivity : Activity() {
                 }
                 .setNegativeButton(tr("Cancel"), null)
                 .show()
-        }, weight(4, 0))
-        c.addView(r0, lpm(8))
-
-        val r1 = hbox()
-        r1.addView(button("Save", false) {
+        }, iconW(4, 4))
+        ra.addView(iconButton(R.drawable.ic_save, "Save") {
             promptName { n ->
                 ScriptStore.save(this, Script(n, Session.script.actions.map { it.copy() }.toMutableList()))
                 toast("Saved")
             }
-        }, weight(0, 4))
-        r1.addView(button("Load", false) { loadDialog() }, weight(4, 0))
-        c.addView(r1, lpm(8))
+        }, iconW(4, 4))
+        ra.addView(iconButton(R.drawable.ic_folder_open, "Load") { loadDialog() }, iconW(4, 0))
+        c.addView(ra, lpm(8))
 
-        val r2 = hbox()
-        r2.addView(button("Export", false) {
+        val rb = hbox()
+        rb.addView(iconButton(R.drawable.ic_upload, "Export") {
             val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
             i.addCategory(Intent.CATEGORY_OPENABLE)
             i.type = "application/json"
             i.putExtra(Intent.EXTRA_TITLE, "clicker-script.json")
             safeStartForResult(i, reqExport)
-        }, weight(0, 4))
-        r2.addView(button("Import", false) {
+        }, iconW(0, 4))
+        rb.addView(iconButton(R.drawable.ic_download, "Import") {
             val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
             i.addCategory(Intent.CATEGORY_OPENABLE)
             i.type = "*/*"
             safeStartForResult(i, reqImport)
-        }, weight(4, 0))
-        c.addView(r2, lpm(8))
-
-        val r3 = hbox()
-        r3.addView(button("Share", false) { shareScript() }, weight(0, 4))
-        r3.addView(button("Paste", false) { pasteScript() }, weight(4, 0))
-        c.addView(r3, lpm(0))
+        }, iconW(4, 4))
+        rb.addView(iconButton(R.drawable.ic_share, "Share") { shareScript() }, iconW(4, 4))
+        rb.addView(iconButton(R.drawable.ic_paste, "Paste") { pasteScript() }, iconW(4, 0))
+        c.addView(rb, lpm(0))
         return c
     }
 
@@ -1210,12 +1429,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun miniBtn(label: String, enabled: Boolean, onClick: () -> Unit): TextView {
-        val b = text(label, 16f, P.accent, true)
-        b.gravity = Gravity.CENTER
-        b.alpha = if (enabled) 1f else 0.25f
-        if (enabled) b.setOnClickListener { onClick() }
-        return b
+    private fun miniIcon(res: Int, enabled: Boolean, onClick: () -> Unit): ImageView {
+        val v = ImageView(this)
+        v.setImageResource(res)
+        v.setColorFilter(P.accent)
+        v.alpha = if (enabled) 1f else 0.25f
+        v.setPadding(dp(6), dp(8), dp(6), dp(8))
+        if (enabled) v.setOnClickListener { onClick() }
+        return v
     }
 
     private fun refreshList() {
@@ -1269,10 +1490,9 @@ class MainActivity : Activity() {
             if (subtitle.isNotEmpty()) col.addView(text(subtitle, 11f, P.sub))
             row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-            val sz = LinearLayout.LayoutParams(dp(30), dp(34))
-            row.addView(miniBtn("↑", i > 0) { moveAction(i, -1) }, sz)
-            row.addView(miniBtn("↓", i < acts.size - 1) { moveAction(i, 1) }, LinearLayout.LayoutParams(dp(30), dp(34)))
-            row.addView(miniBtn("⧉", acts.size < MAX_ACTIONS) { duplicateAction(i) }, LinearLayout.LayoutParams(dp(30), dp(34)))
+            row.addView(miniIcon(R.drawable.ic_arrow_up, i > 0) { moveAction(i, -1) }, LinearLayout.LayoutParams(dp(32), dp(36)))
+            row.addView(miniIcon(R.drawable.ic_arrow_down, i < acts.size - 1) { moveAction(i, 1) }, LinearLayout.LayoutParams(dp(32), dp(36)))
+            row.addView(miniIcon(R.drawable.ic_copy, acts.size < MAX_ACTIONS) { duplicateAction(i) }, LinearLayout.LayoutParams(dp(32), dp(36)))
             row.setOnClickListener { editDialog(i) }
             listBox.addView(row, lpm(8))
         }

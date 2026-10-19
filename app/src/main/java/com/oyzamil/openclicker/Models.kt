@@ -250,10 +250,25 @@ object Prefs {
         get() = bool("autoEnable", true)
         set(v) = putBool("autoEnable", v)
 
-    /** Keep the main thread alive after unexpected exceptions so the service is not marked "Not working". */
+    /** EXPERIMENTAL: keep the main thread alive after unexpected exceptions. Off by default. */
     var crashGuard: Boolean
-        get() = bool("crashGuard", true)
+        get() = bool("crashGuard", false)
         set(v) = putBool("crashGuard", v)
+
+    /** Timestamp of the newest process-exit record already written to the log. */
+    var lastExitLogged: Long
+        get() = sp.getLong("lastExitLogged", 0L)
+        set(v) { sp.edit().putLong("lastExitLogged", v).apply() }
+
+    /** User confirmed the phone-specific "Autostart" switch is on (cannot be detected). */
+    var autostartDone: Boolean
+        get() = bool("autostartDone", false)
+        set(v) = putBool("autostartDone", v)
+
+    /** The battery-optimization dialog was already shown once automatically (do not nag). */
+    var batteryAsked: Boolean
+        get() = bool("batteryAsked", false)
+        set(v) = putBool("batteryAsked", v)
 
     /** Notification permission was already requested once (do not nag). */
     var notifAsked: Boolean

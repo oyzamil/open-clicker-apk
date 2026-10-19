@@ -15,6 +15,9 @@ Wait, and system buttons (Back, Home, Recents, Notifications, Quick settings).
 - Indicator size slider, lock indicators, hide indicators, panel opacity + size
 - Volume Up + Down together = start / stop
 - Quick Settings tile and a Stop notification
+- Floating panel shows a live countdown to the next action (e.g. 1:59 for a 2 minute delay) and the action count
+- Icon-based, compact UI (long-press an icon to see its name)
+- Setup card asks for battery "no restrictions" and shows autostart shortcuts for Xiaomi / Oppo / Vivo / Infinix / Tecno / Huawei
 - Auto-show the floating panel (and load a script) when chosen apps open
 - Kill switch: auto-stop when the screen turns off (default ON)
 - English / Urdu, dark / light / system theme
@@ -22,7 +25,7 @@ Wait, and system buttons (Back, Home, Recents, Notifications, Quick settings).
 ## Keeping the accessibility service enabled
 Android turns an accessibility service off after a force-stop ("Clear all", battery cleaners), some updates,
 and marks it "Not working" if the app process crashes. The app protects against both:
-- Crash guard + error log (Safety card > Share error log).
+- Error log with the reason the app process last died (Safety card > Share error log; also shown under the status). The experimental crash guard is OFF by default.
 - One-time ADB permission so the app can switch its own service back on (also after reboot / update):
   `adb shell pm grant com.oyzamil.openclicker android.permission.WRITE_SECURE_SETTINGS`
   (the app shows this command in the "Stay enabled" card; the grant survives updates, not uninstall).
