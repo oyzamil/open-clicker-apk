@@ -193,6 +193,10 @@ object I18n {
         "Autostart / background start" to "آٹو اسٹارٹ / بیک گراؤنڈ اسٹارٹ",
         "Your phone has its own switch that stops apps from restarting after the system closes them. Turn it ON for Open Clicker." to "آپ کے فون میں ایک الگ سوئچ ہوتا ہے جو سسٹم کے بند کرنے کے بعد ایپس کو دوبارہ چلنے سے روکتا ہے۔ اوپن کلکر کے لیے اسے آن کریں۔",
         "Done" to "ہو گیا",
+        "Clicks at a time" to "ایک وقت میں کلکس",
+        "Times in a row" to "لگاتار بار",
+        "Delay between them" to "ان کے درمیان وقفہ",
+        "Example: 2 clicks at a time with 100 ms between them. The main delay (for example 30 s) starts after the 2nd click." to "مثال: ایک وقت میں 2 کلک، ان کے درمیان 100 ms۔ اصل وقفہ (مثلاً 30 s) دوسرے کلک کے بعد شروع ہوتا ہے۔",
         "Auto-stopped (timer)" to "خودکار بند (ٹائمر)"
     )
 

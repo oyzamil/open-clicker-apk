@@ -52,7 +52,11 @@ data class ClickAction(
     /** SCROLL: distance as percent of screen height/width. PINCH: span as percent of the short screen side. */
     var distPct: Int = 50,
     /** GLOBAL only: GlobalAct value. */
-    var global: Int = 0
+    var global: Int = 0,
+    /** Clicks (or gestures) performed at a time, back to back, before the normal delay starts. */
+    var burst: Int = 1,
+    /** Delay between the gestures inside one burst, ms. */
+    var burstDelayMs: Long = 100L
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("type", type.name)
@@ -64,6 +68,8 @@ data class ClickAction(
         .put("dir", dir)
         .put("dist", distPct)
         .put("global", global)
+        .put("burst", burst)
+        .put("burstDelay", burstDelayMs)
 
     companion object {
         private fun f(o: JSONObject, k: String): Float {
@@ -82,7 +88,9 @@ data class ClickAction(
             repeat = o.optInt("repeat", 1).coerceIn(1, 100_000),
             dir = o.optInt("dir", ScrollDir.DOWN).coerceIn(0, 3),
             distPct = o.optInt("dist", 50).coerceIn(1, 100),
-            global = o.optInt("global", 0).coerceIn(0, 4)
+            global = o.optInt("global", 0).coerceIn(0, 4),
+            burst = o.optInt("burst", 1).coerceIn(1, 1000),
+            burstDelayMs = o.optLong("burstDelay", 100L).coerceIn(0L, 3_600_000L)
         )
     }
 }
@@ -197,6 +205,20 @@ object Prefs {
     var loops: Int
         get() = int("loops", 0, 0, 1_000_000_000)
         set(v) = putInt("loops", v, 0, 1_000_000_000)
+
+    /** Single mode: how many clicks (gestures) happen at a time before the main delay. */
+    var burstCount: Int
+        get() = int("burstCount", 1, 1, 1000)
+        set(v) = putInt("burstCount", v, 1, 1000)
+
+    /** Single mode: delay between the clicks inside one burst, ms. */
+    var burstDelayMs: Long
+        get() = sp.getLong("burstDelay", 100L).coerceIn(0L, 3_600_000L)
+        set(v) { sp.edit().putLong("burstDelay", v.coerceIn(0L, 3_600_000L)).apply() }
+
+    var burstDelayUnit: Int
+        get() = int("burstDelayUnit", 0, 0, 2)
+        set(v) = putInt("burstDelayUnit", v, 0, 2)
 
     /** Seconds of 3-2-1 countdown before a run starts. */
     var countdownSec: Int

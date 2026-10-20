@@ -9,6 +9,7 @@ Wait, and system buttons (Back, Home, Recents, Notifications, Quick settings).
 ## Features
 - Delay input with ms / sec / min segmented selector (auto-converted to ms), presets up to 5 min
 - Start countdown (3-2-1) and auto-stop timer
+- Clicks at a time (burst): N clicks with a short delay between them, then the main delay (e.g. 2 clicks, 100 ms apart, then 30 s)
 - Repeat count + per-action repeat, live run counter and elapsed time on the panel
 - Multi mode: record, add via the + menu, edit, reorder, duplicate, undo, save / load / export / import / share / paste
 - Human-like slide and scroll (curved path, random speed), random position / interval

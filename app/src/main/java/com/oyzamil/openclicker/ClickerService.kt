@@ -123,6 +123,7 @@ class ClickerService : AccessibilityService() {
     private var steps: List<ClickAction> = emptyList()
     private var idx = 0
     private var repIdx = 0
+    private var burstIdx = 0
     private var loopCount = 0
     private var stepSeq = 0
     private var runCount = 0
@@ -1060,7 +1061,12 @@ class ClickerService : AccessibilityService() {
         if (isBusy()) stopRun() else startRun(dismissShade)
     }
 
-    private fun singleAction(): ClickAction = when (Prefs.singleType) {
+    private fun singleAction(): ClickAction = singleActionBase().also {
+        it.burst = Prefs.burstCount
+        it.burstDelayMs = Prefs.burstDelayMs
+    }
+
+    private fun singleActionBase(): ClickAction = when (Prefs.singleType) {
         0 -> ClickAction(
             ActionType.TAP, Prefs.singleX, Prefs.singleY,
             durationMs = Prefs.tapDurationMs, delayMs = Prefs.delayMs
@@ -1130,6 +1136,7 @@ class ClickerService : AccessibilityService() {
         running = true
         idx = 0
         repIdx = 0
+        burstIdx = 0
         loopCount = 0
         stepSeq = 0
         runCount = 0
@@ -1412,6 +1419,21 @@ class ClickerService : AccessibilityService() {
                 return
             }
         }
+        val ri = Prefs.randomIntervalMs
+        val extra = if (ri > 0) rnd.nextInt(2 * ri + 1) - ri else 0
+        val minDelay = if (success) 1L else 100L
+
+        // Several clicks "at a time": short delay between them, the normal delay only after the last one.
+        val burstN = if (a.type == ActionType.WAIT || a.type == ActionType.GLOBAL) 1 else a.burst.coerceIn(1, 1000)
+        burstIdx++
+        if (burstIdx < burstN) {
+            val bd = (a.burstDelayMs + extra).coerceAtLeast(minDelay)
+            nextAt = SystemClock.elapsedRealtime() + bd
+            runHandler.postDelayed({ runStep() }, bd)
+            return
+        }
+        burstIdx = 0
+
         repIdx++
         if (repIdx >= a.repeat.coerceAtLeast(1)) {
             repIdx = 0
@@ -1425,9 +1447,6 @@ class ClickerService : AccessibilityService() {
                 }
             }
         }
-        val ri = Prefs.randomIntervalMs
-        val extra = if (ri > 0) rnd.nextInt(2 * ri + 1) - ri else 0
-        val minDelay = if (success) 1L else 100L
         val d = (a.delayMs + extra).coerceAtLeast(minDelay)
         nextAt = SystemClock.elapsedRealtime() + d
         runHandler.postDelayed({ runStep() }, d)

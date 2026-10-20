@@ -95,6 +95,7 @@ class MainActivity : Activity() {
     private lateinit var stayCmdRow: LinearLayout
     private lateinit var batteryRow: View
     private lateinit var autostartRow: View
+    private lateinit var burstLabel: TextView
     private var accessRows: List<View> = emptyList()
     private val stepRows = mutableListOf<Pair<View, TextView>>()
     private var resumedAt = 0L
@@ -901,6 +902,26 @@ class MainActivity : Activity() {
         }
         c.addView(pinchSeg.root, lpm(8))
 
+        burstLabel = numRow(
+            c, "Clicks at a time",
+            { Prefs.burstCount.toLong() },
+            { Prefs.burstCount = it.coerceIn(1L, 1000L).toInt() }
+        )
+        val bd = text("Delay between them", 14f, P.sub)
+        bd.setPadding(0, dp(12), 0, dp(6))
+        c.addView(bd)
+        val bti = TimeInput(Prefs.burstDelayMs, Prefs.burstDelayUnit, false) { ms, unit ->
+            Prefs.burstDelayMs = ms
+            Prefs.burstDelayUnit = unit
+        }
+        c.addView(bti.root)
+        val bh = text(
+            "Example: 2 clicks at a time with 100 ms between them. The main delay (for example 30 s) starts after the 2nd click.",
+            12f, P.sub
+        )
+        bh.setPadding(0, dp(8), 0, dp(10))
+        c.addView(bh)
+
         singleHint = text("", 12f, P.sub)
         c.addView(singleHint)
         styleSingle()
@@ -912,6 +933,7 @@ class MainActivity : Activity() {
         dirSeg.refresh()
         pinchSeg.refresh()
         val t = Prefs.singleType
+        if (::burstLabel.isInitialized) burstLabel.text = tr(if (t == 0) "Clicks at a time" else "Times in a row")
         dirSeg.root.visibility = if (t == 2) View.VISIBLE else View.GONE
         pinchSeg.root.visibility = if (t == 4) View.VISIBLE else View.GONE
         singleHint.text = tr(
@@ -1033,7 +1055,7 @@ class MainActivity : Activity() {
         return c
     }
 
-    private fun numRow(parent: LinearLayout, label: String, get: () -> Long, set: (Long) -> Unit) {
+    private fun numRow(parent: LinearLayout, label: String, get: () -> Long, set: (Long) -> Unit): TextView {
         val row = hbox()
         row.setPadding(0, dp(8), 0, 0)
         val t = text(label, 14f, P.sub)
@@ -1046,6 +1068,7 @@ class MainActivity : Activity() {
             rightMargin = dp(8)
         })
         parent.addView(row)
+        return t
     }
 
     // ---------- indicators / panel ----------
@@ -1481,11 +1504,16 @@ class MainActivity : Activity() {
             }
             col.addView(text(title, 13f, P.text, true))
             val rep = if (a.repeat > 1) "  ·  ×${a.repeat}" else ""
+            val bur = if (a.burst > 1 && a.type != ActionType.WAIT && a.type != ActionType.GLOBAL) {
+                "  ·  ⚡ ${a.burst} × ${humanMs(a.burstDelayMs)}"
+            } else {
+                ""
+            }
             val subtitle = when (a.type) {
                 ActionType.WAIT -> rep.removePrefix("  ·  ")
                 ActionType.GLOBAL -> "${tr("delay")} ${humanMs(a.delayMs)}$rep"
-                ActionType.LONG_PRESS -> "${tr("delay")} ${humanMs(a.delayMs)}$rep"
-                else -> "${tr("duration")} ${a.durationMs} ms  ·  ${tr("delay")} ${humanMs(a.delayMs)}$rep"
+                ActionType.LONG_PRESS -> "${tr("delay")} ${humanMs(a.delayMs)}$bur$rep"
+                else -> "${tr("duration")} ${a.durationMs} ms  ·  ${tr("delay")} ${humanMs(a.delayMs)}$bur$rep"
             }
             if (subtitle.isNotEmpty()) col.addView(text(subtitle, 11f, P.sub))
             row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -1578,8 +1606,15 @@ class MainActivity : Activity() {
             label("System button")
             box.addView(segBound(GlobalAct.labels, a.global, 12f) { globalSel = it }.root)
         }
+        var eb: EditText? = null
+        var burstTi: TimeInput? = null
         if (hasPos) {
             ed = input(if (a.type == ActionType.LONG_PRESS) "Hold time (ms)" else "Duration (ms)", a.durationMs)
+            eb = input(if (a.type == ActionType.TAP) "Clicks at a time" else "Times in a row", a.burst)
+            label("Delay between them")
+            val bt = TimeInput(a.burstDelayMs, pickUnit(a.burstDelayMs), false) { _, _ -> }
+            burstTi = bt
+            box.addView(bt.root)
         }
         val er = input("Repeat (times before next action)", a.repeat)
         label(if (a.type == ActionType.WAIT) "Wait duration" else "Delay after this action")
@@ -1602,6 +1637,8 @@ class MainActivity : Activity() {
                 if (a.type == ActionType.GLOBAL) a.global = globalSel.coerceIn(0, 4)
                 edist?.let { a.distPct = (it.text.toString().toIntOrNull() ?: a.distPct).coerceIn(1, 100) }
                 ed?.let { a.durationMs = (it.text.toString().toLongOrNull() ?: a.durationMs).coerceIn(1L, 60_000L) }
+                eb?.let { a.burst = (it.text.toString().toIntOrNull() ?: a.burst).coerceIn(1, 1000) }
+                burstTi?.let { a.burstDelayMs = it.getMs() }
                 a.repeat = (er.text.toString().toIntOrNull() ?: a.repeat).coerceIn(1, 100_000)
                 a.delayMs = delayTi.getMs()
                 changed()
