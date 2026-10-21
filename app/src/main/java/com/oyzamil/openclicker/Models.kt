@@ -56,7 +56,9 @@ data class ClickAction(
     /** Clicks (or gestures) performed at a time, back to back, before the normal delay starts. */
     var burst: Int = 1,
     /** Delay between the gestures inside one burst, ms. */
-    var burstDelayMs: Long = 100L
+    var burstDelayMs: Long = 100L,
+    /** 0 = fixed delay. If greater than delayMs, the delay after this action is random between delayMs and this. */
+    var delayMaxMs: Long = 0L
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("type", type.name)
@@ -70,6 +72,7 @@ data class ClickAction(
         .put("global", global)
         .put("burst", burst)
         .put("burstDelay", burstDelayMs)
+        .put("delayMax", delayMaxMs)
 
     companion object {
         private fun f(o: JSONObject, k: String): Float {
@@ -90,7 +93,8 @@ data class ClickAction(
             distPct = o.optInt("dist", 50).coerceIn(1, 100),
             global = o.optInt("global", 0).coerceIn(0, 4),
             burst = o.optInt("burst", 1).coerceIn(1, 1000),
-            burstDelayMs = o.optLong("burstDelay", 100L).coerceIn(0L, 3_600_000L)
+            burstDelayMs = o.optLong("burstDelay", 100L).coerceIn(0L, 3_600_000L),
+            delayMaxMs = o.optLong("delayMax", 0L).coerceIn(0L, 86_400_000L)
         )
     }
 }
@@ -205,6 +209,27 @@ object Prefs {
     var loops: Int
         get() = int("loops", 0, 0, 1_000_000_000)
         set(v) = putInt("loops", v, 0, 1_000_000_000)
+
+    /** false = fixed delay, true = a random delay between A and B after every action. */
+    var delayRandom: Boolean
+        get() = bool("delayRandom", false)
+        set(v) = putBool("delayRandom", v)
+
+    var delayMinMs: Long
+        get() = sp.getLong("delayMin", 1000L).coerceIn(0L, 86_400_000L)
+        set(v) { sp.edit().putLong("delayMin", v.coerceIn(0L, 86_400_000L)).apply() }
+
+    var delayMinUnit: Int
+        get() = int("delayMinUnit", 1, 0, 2)
+        set(v) = putInt("delayMinUnit", v, 0, 2)
+
+    var delayMaxMs: Long
+        get() = sp.getLong("delayMax", 3000L).coerceIn(0L, 86_400_000L)
+        set(v) { sp.edit().putLong("delayMax", v.coerceIn(0L, 86_400_000L)).apply() }
+
+    var delayMaxUnit: Int
+        get() = int("delayMaxUnit", 1, 0, 2)
+        set(v) = putInt("delayMaxUnit", v, 0, 2)
 
     /** Single mode: how many clicks (gestures) happen at a time before the main delay. */
     var burstCount: Int

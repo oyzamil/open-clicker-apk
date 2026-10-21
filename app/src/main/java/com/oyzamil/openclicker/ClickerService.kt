@@ -977,6 +977,7 @@ class ClickerService : AccessibilityService() {
                 durationMs = 1L, delayMs = max(500L, Prefs.delayMs), global = global
             )
         }
+        applyRandomDelay(a)
         Session.script.actions.add(a)
         Session.persist()
         refreshMarkers()
@@ -1064,6 +1065,32 @@ class ClickerService : AccessibilityService() {
     private fun singleAction(): ClickAction = singleActionBase().also {
         it.burst = Prefs.burstCount
         it.burstDelayMs = Prefs.burstDelayMs
+        applyRandomDelay(it)
+    }
+
+    /** Random delay mode: the delay after the action becomes a range [A, B] picked again every time. */
+    private fun applyRandomDelay(a: ClickAction) {
+        if (!Prefs.delayRandom) return
+        val lo0 = min(Prefs.delayMinMs, Prefs.delayMaxMs)
+        val hi0 = max(Prefs.delayMinMs, Prefs.delayMaxMs)
+        val floor = when (a.type) {
+            ActionType.WAIT -> 1000L
+            ActionType.GLOBAL -> 500L
+            else -> 0L
+        }
+        val lo = max(lo0, floor)
+        val hi = max(hi0, lo)
+        a.delayMs = lo
+        a.delayMaxMs = if (hi > lo) hi else 0L
+    }
+
+    /** Fixed delay, or a random value between delayMs and delayMaxMs. */
+    private fun pickDelay(a: ClickAction): Long {
+        val lo = a.delayMs
+        val hi = a.delayMaxMs
+        if (hi <= lo) return lo
+        val span = hi - lo
+        return lo + (rnd.nextDouble() * (span + 1)).toLong().coerceAtMost(span)
     }
 
     private fun singleActionBase(): ClickAction = when (Prefs.singleType) {
@@ -1447,7 +1474,7 @@ class ClickerService : AccessibilityService() {
                 }
             }
         }
-        val d = (a.delayMs + extra).coerceAtLeast(minDelay)
+        val d = (pickDelay(a) + extra).coerceAtLeast(minDelay)
         nextAt = SystemClock.elapsedRealtime() + d
         runHandler.postDelayed({ runStep() }, d)
     }

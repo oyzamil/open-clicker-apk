@@ -197,6 +197,11 @@ object I18n {
         "Times in a row" to "لگاتار بار",
         "Delay between them" to "ان کے درمیان وقفہ",
         "Example: 2 clicks at a time with 100 ms between them. The main delay (for example 30 s) starts after the 2nd click." to "مثال: ایک وقت میں 2 کلک، ان کے درمیان 100 ms۔ اصل وقفہ (مثلاً 30 s) دوسرے کلک کے بعد شروع ہوتا ہے۔",
+        "Fixed delay" to "مقررہ وقفہ",
+        "Random delay" to "رینڈم وقفہ",
+        "From (A)" to "سے (A)",
+        "To (B)" to "تک (B)",
+        "After every action the app waits a random time between A and B. Example: From 20 s, To 40 s." to "ہر ایکشن کے بعد ایپ A اور B کے درمیان رینڈم وقت انتظار کرتی ہے۔ مثال: 20 s سے 40 s تک۔",
         "Auto-stopped (timer)" to "خودکار بند (ٹائمر)"
     )
 

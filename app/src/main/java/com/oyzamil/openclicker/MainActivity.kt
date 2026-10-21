@@ -96,6 +96,10 @@ class MainActivity : Activity() {
     private lateinit var batteryRow: View
     private lateinit var autostartRow: View
     private lateinit var burstLabel: TextView
+    private lateinit var delayModeSeg: Seg
+    private lateinit var fixedBox: LinearLayout
+    private lateinit var randomBox: LinearLayout
+    private lateinit var randomConv: TextView
     private var accessRows: List<View> = emptyList()
     private val stepRows = mutableListOf<Pair<View, TextView>>()
     private var resumedAt = 0L
@@ -956,6 +960,14 @@ class MainActivity : Activity() {
         hint.setPadding(0, dp(2), 0, dp(12))
         c.addView(hint)
 
+        delayModeSeg = segmented(listOf("Fixed delay", "Random delay"), { if (Prefs.delayRandom) 1 else 0 }, neutral = true) { i ->
+            Prefs.delayRandom = (i == 1)
+            delayModeSeg.refresh()
+            applyDelayMode()
+        }
+        c.addView(delayModeSeg.root, lpm(12))
+
+        fixedBox = vbox()
         convText = text("", 13f, P.accent, true)
         convText.gravity = Gravity.CENTER
 
@@ -964,13 +976,13 @@ class MainActivity : Activity() {
             Prefs.delayUnit = unit
             updateConv(ms)
         }
-        c.addView(delayInput.root, lpm(10))
+        fixedBox.addView(delayInput.root, lpm(10))
 
         val row = hbox()
         row.addView(button("−", false) { stepDelay(-1) }, LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT))
         row.addView(convText, weight(8, 8))
         row.addView(button("+", false) { stepDelay(1) }, LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT))
-        c.addView(row, lpm(12))
+        fixedBox.addView(row, lpm(12))
         updateConv(Prefs.delayMs)
 
         val scroll = HorizontalScrollView(this)
@@ -994,8 +1006,52 @@ class MainActivity : Activity() {
             )
         }
         scroll.addView(chips)
-        c.addView(scroll)
+        fixedBox.addView(scroll)
+        c.addView(fixedBox)
+
+        randomBox = vbox()
+        val la = text("From (A)", 13f, P.sub)
+        la.setPadding(0, 0, 0, dp(6))
+        randomBox.addView(la)
+        val minTi = TimeInput(Prefs.delayMinMs, Prefs.delayMinUnit, false) { ms, unit ->
+            Prefs.delayMinMs = ms
+            Prefs.delayMinUnit = unit
+            updateRandomConv()
+        }
+        randomBox.addView(minTi.root, lpm(12))
+        val lb = text("To (B)", 13f, P.sub)
+        lb.setPadding(0, 0, 0, dp(6))
+        randomBox.addView(lb)
+        val maxTi = TimeInput(Prefs.delayMaxMs, Prefs.delayMaxUnit, false) { ms, unit ->
+            Prefs.delayMaxMs = ms
+            Prefs.delayMaxUnit = unit
+            updateRandomConv()
+        }
+        randomBox.addView(maxTi.root, lpm(10))
+        randomConv = text("", 13f, P.accent, true)
+        randomConv.gravity = Gravity.CENTER
+        randomBox.addView(randomConv, lpm(6))
+        randomBox.addView(
+            text("After every action the app waits a random time between A and B. Example: From 20 s, To 40 s.", 12f, P.sub)
+        )
+        c.addView(randomBox)
+        updateRandomConv()
+        applyDelayMode()
         return c
+    }
+
+    private fun applyDelayMode() {
+        fixedBox.visibility = if (Prefs.delayRandom) View.GONE else View.VISIBLE
+        randomBox.visibility = if (Prefs.delayRandom) View.VISIBLE else View.GONE
+    }
+
+    private fun updateRandomConv() {
+        if (!::randomConv.isInitialized) return
+        val a = Prefs.delayMinMs
+        val b = Prefs.delayMaxMs
+        val lo = minOf(a, b)
+        val hi = maxOf(a, b)
+        randomConv.text = "= ${String.format(Locale.US, "%,d", lo)} – ${String.format(Locale.US, "%,d", hi)} ms"
     }
 
     private fun updateConv(ms: Long) {
@@ -1462,6 +1518,9 @@ class MainActivity : Activity() {
         return v
     }
 
+    private fun delayText(a: ClickAction): String =
+        if (a.delayMaxMs > a.delayMs) "${humanMs(a.delayMs)}–${humanMs(a.delayMaxMs)}" else humanMs(a.delayMs)
+
     private fun refreshList() {
         if (!::listBox.isInitialized) return
         listBox.removeAllViews()
@@ -1499,7 +1558,7 @@ class MainActivity : Activity() {
                 ActionType.SWIPE -> "${tr("Slide")}  $pos → (${a.x2.toInt()}, ${a.y2.toInt()})"
                 ActionType.SCROLL -> "${tr("Scroll")} ${ScrollDir.arrow(a.dir)} ${a.distPct}%  $pos"
                 ActionType.PINCH -> "${tr("Pinch")} ${tr(if (a.dir == 1) "Zoom in" else "Zoom out")}  $pos"
-                ActionType.WAIT -> "${tr("Wait")}  ${humanMs(a.delayMs)}"
+                ActionType.WAIT -> "${tr("Wait")}  ${delayText(a)}"
                 ActionType.GLOBAL -> "${GlobalAct.symbol(a.global)} ${tr(GlobalAct.name(a.global))}"
             }
             col.addView(text(title, 13f, P.text, true))
@@ -1511,9 +1570,9 @@ class MainActivity : Activity() {
             }
             val subtitle = when (a.type) {
                 ActionType.WAIT -> rep.removePrefix("  ·  ")
-                ActionType.GLOBAL -> "${tr("delay")} ${humanMs(a.delayMs)}$rep"
-                ActionType.LONG_PRESS -> "${tr("delay")} ${humanMs(a.delayMs)}$bur$rep"
-                else -> "${tr("duration")} ${a.durationMs} ms  ·  ${tr("delay")} ${humanMs(a.delayMs)}$bur$rep"
+                ActionType.GLOBAL -> "${tr("delay")} ${delayText(a)}$rep"
+                ActionType.LONG_PRESS -> "${tr("delay")} ${delayText(a)}$bur$rep"
+                else -> "${tr("duration")} ${a.durationMs} ms  ·  ${tr("delay")} ${delayText(a)}$bur$rep"
             }
             if (subtitle.isNotEmpty()) col.addView(text(subtitle, 11f, P.sub))
             row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -1618,8 +1677,33 @@ class MainActivity : Activity() {
         }
         val er = input("Repeat (times before next action)", a.repeat)
         label(if (a.type == ActionType.WAIT) "Wait duration" else "Delay after this action")
+        val startRandom = a.delayMaxMs > a.delayMs
         val delayTi = TimeInput(a.delayMs, pickUnit(a.delayMs), false) { _, _ -> }
-        box.addView(delayTi.root)
+        val fixedBoxD = vbox()
+        fixedBoxD.addView(delayTi.root)
+        val rangeBox = vbox()
+        val ra = text("From (A)", 12f, P.sub)
+        ra.setPadding(0, dp(6), 0, dp(2))
+        rangeBox.addView(ra)
+        val aTi = TimeInput(a.delayMs, pickUnit(a.delayMs), false) { _, _ -> }
+        rangeBox.addView(aTi.root)
+        val rb = text("To (B)", 12f, P.sub)
+        rb.setPadding(0, dp(10), 0, dp(2))
+        rangeBox.addView(rb)
+        val bInit = if (startRandom) a.delayMaxMs else a.delayMs * 2
+        val bTi = TimeInput(bInit, pickUnit(bInit), false) { _, _ -> }
+        rangeBox.addView(bTi.root)
+        var randomSel = startRandom
+        val modeSegD = segBound(listOf("Fixed delay", "Random delay"), if (startRandom) 1 else 0) { sel ->
+            randomSel = (sel == 1)
+            fixedBoxD.visibility = if (randomSel) View.GONE else View.VISIBLE
+            rangeBox.visibility = if (randomSel) View.VISIBLE else View.GONE
+        }
+        box.addView(modeSegD.root, lpm(6))
+        fixedBoxD.visibility = if (startRandom) View.GONE else View.VISIBLE
+        rangeBox.visibility = if (startRandom) View.VISIBLE else View.GONE
+        box.addView(fixedBoxD)
+        box.addView(rangeBox)
 
         val scroll = ScrollView(this)
         scroll.addView(box)
@@ -1640,7 +1724,17 @@ class MainActivity : Activity() {
                 eb?.let { a.burst = (it.text.toString().toIntOrNull() ?: a.burst).coerceIn(1, 1000) }
                 burstTi?.let { a.burstDelayMs = it.getMs() }
                 a.repeat = (er.text.toString().toIntOrNull() ?: a.repeat).coerceIn(1, 100_000)
-                a.delayMs = delayTi.getMs()
+                if (randomSel) {
+                    val x = aTi.getMs()
+                    val y = bTi.getMs()
+                    val lo = minOf(x, y)
+                    val hi = maxOf(x, y)
+                    a.delayMs = lo
+                    a.delayMaxMs = if (hi > lo) hi else 0L
+                } else {
+                    a.delayMs = delayTi.getMs()
+                    a.delayMaxMs = 0L
+                }
                 changed()
             }
             .setNeutralButton(tr("Delete")) { _, _ ->
