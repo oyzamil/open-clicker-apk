@@ -177,6 +177,11 @@ object Prefs {
         get() = sp.getLong("tapDur", 10L).coerceIn(1L, 60_000L)
         set(v) { sp.edit().putLong("tapDur", v.coerceIn(1L, 60_000L)).apply() }
 
+    /** Unit shown for the press duration of a click: 0 = ms, 1 = sec, 2 = min. */
+    var tapDurationUnit: Int
+        get() = int("tapDurationUnit", 0, 0, 2)
+        set(v) = putInt("tapDurationUnit", v, 0, 2)
+
     /** Hold time of a long press, ms. */
     var longPressMs: Long
         get() = sp.getLong("longPress", 800L).coerceIn(100L, 60_000L)

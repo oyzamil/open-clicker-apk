@@ -96,6 +96,7 @@ class MainActivity : Activity() {
     private lateinit var batteryRow: View
     private lateinit var autostartRow: View
     private lateinit var burstLabel: TextView
+    private lateinit var pressBox: LinearLayout
     private lateinit var delayModeSeg: Seg
     private lateinit var fixedBox: LinearLayout
     private lateinit var randomBox: LinearLayout
@@ -906,6 +907,27 @@ class MainActivity : Activity() {
         }
         c.addView(pinchSeg.root, lpm(8))
 
+        pressBox = vbox()
+        val pl = text("Press duration", 14f, P.sub)
+        pl.setPadding(0, dp(4), 0, dp(6))
+        pressBox.addView(pl)
+        val pressWarn = text("Maximum is 60 s", 12f, P.bad)
+        pressWarn.visibility = View.GONE
+        val pressTi = TimeInput(Prefs.tapDurationMs, Prefs.tapDurationUnit, false) { ms, unit ->
+            Prefs.tapDurationMs = ms
+            Prefs.tapDurationUnit = unit
+            pressWarn.visibility = if (ms > 60_000L) View.VISIBLE else View.GONE
+        }
+        pressBox.addView(pressTi.root)
+        pressBox.addView(pressWarn)
+        val ph = text(
+            "How long each press is held. 10 ms is a normal tap; 1 s or more works as a long press (max 60 s).",
+            12f, P.sub
+        )
+        ph.setPadding(0, dp(6), 0, dp(12))
+        pressBox.addView(ph)
+        c.addView(pressBox)
+
         burstLabel = numRow(
             c, "Clicks at a time",
             { Prefs.burstCount.toLong() },
@@ -938,6 +960,7 @@ class MainActivity : Activity() {
         pinchSeg.refresh()
         val t = Prefs.singleType
         if (::burstLabel.isInitialized) burstLabel.text = tr(if (t == 0) "Clicks at a time" else "Times in a row")
+        if (::pressBox.isInitialized) pressBox.visibility = if (t == 0) View.VISIBLE else View.GONE
         dirSeg.root.visibility = if (t == 2) View.VISIBLE else View.GONE
         pinchSeg.root.visibility = if (t == 4) View.VISIBLE else View.GONE
         singleHint.text = tr(
@@ -1094,7 +1117,6 @@ class MainActivity : Activity() {
         val hint = text("Single mode: how many times the action is performed. Multi mode: how many times the whole sequence runs.", 11f, P.sub)
         hint.setPadding(0, dp(4), 0, dp(4))
         c.addView(hint)
-        numRow(c, "Tap duration (ms)", { Prefs.tapDurationMs }, { Prefs.tapDurationMs = it })
         numRow(c, "Hold time (ms)", { Prefs.longPressMs }, { Prefs.longPressMs = it })
         numRow(c, "Slide / scroll / pinch duration (ms)", { Prefs.swipeDurationMs }, { Prefs.swipeDurationMs = it })
         numRow(c, "Scroll distance (% of screen)", { Prefs.scrollDistPct.toLong() }, { Prefs.scrollDistPct = it.coerceIn(1L, 100L).toInt() })
@@ -1668,7 +1690,14 @@ class MainActivity : Activity() {
         var eb: EditText? = null
         var burstTi: TimeInput? = null
         if (hasPos) {
-            ed = input(if (a.type == ActionType.LONG_PRESS) "Hold time (ms)" else "Duration (ms)", a.durationMs)
+            ed = input(
+                when (a.type) {
+                    ActionType.LONG_PRESS -> "Hold time (ms)"
+                    ActionType.TAP -> "Press duration (ms)"
+                    else -> "Duration (ms)"
+                },
+                a.durationMs
+            )
             eb = input(if (a.type == ActionType.TAP) "Clicks at a time" else "Times in a row", a.burst)
             label("Delay between them")
             val bt = TimeInput(a.burstDelayMs, pickUnit(a.burstDelayMs), false) { _, _ -> }

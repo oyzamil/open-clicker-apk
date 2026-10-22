@@ -202,6 +202,10 @@ object I18n {
         "From (A)" to "سے (A)",
         "To (B)" to "تک (B)",
         "After every action the app waits a random time between A and B. Example: From 20 s, To 40 s." to "ہر ایکشن کے بعد ایپ A اور B کے درمیان رینڈم وقت انتظار کرتی ہے۔ مثال: 20 s سے 40 s تک۔",
+        "Press duration" to "دبانے کا دورانیہ",
+        "Press duration (ms)" to "دبانے کا دورانیہ (ms)",
+        "Maximum is 60 s" to "زیادہ سے زیادہ 60 s",
+        "How long each press is held. 10 ms is a normal tap; 1 s or more works as a long press (max 60 s)." to "ہر پریس کتنی دیر دبا رہے گا۔ 10 ms عام ٹیپ ہے؛ 1 s یا زیادہ لانگ پریس کا کام کرتا ہے (زیادہ سے زیادہ 60 s)۔",
         "Auto-stopped (timer)" to "خودکار بند (ٹائمر)"
     )
 
